@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}File Manager{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>File Manager</h2>
+    <span class="text-muted">{{ files|length }} files in downloads</span>
+</div>
+
+<!-- This section is for showing flash messages (e.g., "File deleted successfully") -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Filename</th>
+                    <th>Size</th>
+                    <th>Date Modified</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for file in files %}
+                <tr>
+                    <td class="text-break">{{ file.name }}</td>
+                    <td>{{ file.size }}</td>
+                    <td>{{ file.modified }}</td>
+                    <td class="text-end">
+                        <!-- Download button (downloads file to your local computer) -->
+                        <a href="{{ url_for('download_file', filename=file.name) }}" class="btn btn-sm btn-primary">Download</a>
+
+                        <!-- Delete button (deletes file from the server) -->
+                        <form action="{{ url_for('delete_file') }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to permanently delete this file?');">
+                            <input type="hidden" name="filename" value="{{ file.name }}">
+                            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" class="text-center p-4">The downloads folder is empty.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

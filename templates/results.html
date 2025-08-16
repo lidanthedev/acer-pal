@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Results for '{{ query }}'{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Search Results for: <span class="text-primary">{{ query }}</span></h2>
+
+{% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+{% elif results %}
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+        {% for movie in results %}
+        <div class="col">
+            <div class="card h-100">
+                <img src="{{ movie.image }}" class="card-img-top" alt="{{ movie.title }}" style="height: 300px; object-fit: cover;">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">{{ movie.title }}</h5>
+                    <div class="mt-auto">
+                        <form action="{{ url_for('select_quality') }}" method="POST">
+                            <input type="hidden" name="url" value="{{ movie.url }}">
+                            <input type="hidden" name="title" value="{{ movie.title }}">
+                            <input type="hidden" name="image" value="{{ movie.image }}">
+                            <button type="submit" class="btn btn-primary w-100">Select Quality</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-warning">No results found for '{{ query }}'. Please try a different search term.</div>
+{% endif %}
+<div class="mt-4">
+    <a href="{{ url_for('index') }}" class="btn btn-secondary">&larr; Back to Search</a>
+</div>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Select Quality for {{ movie.title }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Select Download Option</h2>
+    <a href="javascript:history.back()" class="btn btn-secondary">&larr; Back to Results</a>
+</div>
+
+<div class="card mb-4 flex-md-row shadow-sm">
+    <img src="{{ movie.image }}" class="img-fluid rounded-start" alt="{{ movie.title }}" style="max-width: 200px; object-fit: cover;">
+    <div class="card-body">
+        <h4 class="card-title">{{ movie.title }}</h4>
+        <p class="text-muted">Choose an option below. Movies can be downloaded directly, while TV series require you to select an episode first.</p>
+    </div>
+</div>
+
+<div class="list-group">
+    {% for quality in qualities %}
+        <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            
+            <span>{{ quality.title }}</span>
+
+            <!-- If it's a TV SERIES (has episodesUrl), show a form to go to the episode list -->
+            {% if quality.episodesUrl %}
+                <form action="{{ url_for('list_episodes') }}" method="POST" class="mb-0">
+                    <input type="hidden" name="episodes_api_url" value="{{ quality.episodesUrl }}">
+                    <input type="hidden" name="title" value="{{ movie.title }}">
+                    <input type="hidden" name="image" value="{{ movie.image }}">
+                    <button type="submit" class="btn btn-info">View Episodes</button>
+                </form>
+            
+            <!-- Otherwise, if it's a MOVIE (has a direct url), show the download form -->
+            {% elif quality.url %}
+                <form action="{{ url_for('start_download') }}" method="POST" class="mb-0">
+                    <input type="hidden" name="source_api_url" value="{{ quality.url }}">
+                    <input type="hidden" name="filename" value="{{ movie.title }}_{{ quality.quality }}.mp4">
+                    <input type="hidden" name="seriesType" value="movie">
+                    <button type="submit" class="btn btn-success">Download Movie</button>
+                </form>
+            {% endif %}
+
+        </div>
+    {% endfor %}
+</div>
+{% endblock %}

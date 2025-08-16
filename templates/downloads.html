@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Download Queue{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Download Queue</h2>
+    <button class="btn btn-sm btn-outline-secondary" onclick="updateDownloads()">Refresh Now</button>
+</div>
+
+<div id="downloads-list">
+    <div class="text-center p-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2">Loading download queue...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function updateDownloads() {
+        fetch("{{ url_for('list_downloads') }}")
+            .then(response => response.json())
+            .then(data => {
+                const container = document.getElementById('downloads-list');
+                container.innerHTML = ''; 
+
+                if (data.downloads && data.downloads.length > 0) {
+                    data.downloads.forEach(dl => {
+                        let progressBarColor = 'bg-primary';
+                        let statusText = `${dl.progress}%`;
+                        
+                        // FIX 2: Check status to decide if animation should be active.
+                        let isAnimated = 'progress-bar-animated';
+                        if (dl.status === 'completed') {
+                            progressBarColor = 'bg-success';
+                            statusText = 'Completed';
+                            isAnimated = ''; // Stop animation
+                        } else if (dl.status === 'error') {
+                            progressBarColor = 'bg-danger';
+                            statusText = 'Error';
+                            isAnimated = ''; // Stop animation
+                        }
+
+                        const downloadElement = `
+                            <div class="card mb-3 shadow-sm">
+                                <div class="card-body">
+                                    <h5 class="card-title text-break">${dl.filename}</h5>
+                                    <div class="progress" role="progressbar" aria-valuenow="${dl.progress}" aria-valuemin="0" aria-valuemax="100">
+                                        <div class="progress-bar ${progressBarColor} progress-bar-striped ${isAnimated}" style="width: ${dl.progress}%">
+                                            <strong>${statusText}</strong>
+                                        </div>
+                                    </div>
+                                    <div class="d-flex justify-content-between mt-2 text-muted small">
+                                        <span>Status: <strong class="text-white">${dl.status.charAt(0).toUpperCase() + dl.status.slice(1)}</strong></span>
+                                        <span>Size: <strong class="text-white">${dl.size}</strong></span>
+                                        <span>Speed: <strong class="text-white">${dl.speed}</strong></span>
+                                    </div>
+                                    ${dl.error ? `<div class="alert alert-danger mt-2 small p-2 mb-0">${dl.error}</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                        container.innerHTML += downloadElement;
+                    });
+                } else {
+                    container.innerHTML = '<div class="alert alert-info">The download queue is empty.</div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching downloads:', error);
+                const container = document.getElementById('downloads-list');
+                container.innerHTML = '<div class="alert alert-danger">Could not fetch download status. The server might be offline.</div>';
+            });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        updateDownloads();
+        setInterval(updateDownloads, 300);
+    });
+</script>
+{% endblock %}

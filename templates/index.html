@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Search Movies{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="text-center mb-4">
+            <h1>Search for a Movie or Show</h1>
+            <p class="lead">Find content and download it directly to your server.</p>
+        </div>
+        <div class="card p-4 shadow-sm">
+            <form action="{{ url_for('search_results') }}" method="GET">
+                <div class="input-group">
+                    <input type="text" name="query" class="form-control form-control-lg" placeholder="e.g., The Matrix" required>
+                    <button class="btn btn-primary" type="submit">Search</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

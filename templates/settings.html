@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Application Settings</h2>
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        Download Directory Configuration
+    </div>
+    <div class="card-body">
+        <h5 class="card-title">Current Download Directory</h5>
+        <p class="card-text">The application is currently saving files to the following directory on the server:</p>
+        <p><code>{{ download_dir }}</code></p>
+        <hr>
+        <h5 class="card-title mt-4">How to Change the Download Directory</h5>
+        <p>For security, the download path must be configured on the server where the Python script is running. You can do this by setting an <strong>environment variable</strong> named <code>DOWNLOAD_DIRECTORY</code> before you start the application.</p>
+        
+        <p><strong>If the environment variable is not set, the application will default to a folder named 'downloads' in the same directory as the script.</strong></p>
+
+        <h6 class="mt-4">Instructions for Windows:</h6>
+        <p>Open Command Prompt (cmd) and run the following commands:</p>
+        <pre class="bg-dark text-white p-3 rounded"><code>set DOWNLOAD_DIRECTORY="D:\My Videos\Server Downloads"
+python app.py</code></pre>
+        <p class="small text-muted">Note: The path is set only for the current command prompt session. You need to set it again if you open a new one.</p>
+
+        <h6 class="mt-4">Instructions for Linux / macOS:</h6>
+        <p>Open your terminal and run the following commands:</p>
+        <pre class="bg-dark text-white p-3 rounded"><code>export DOWNLOAD_DIRECTORY="/mnt/data/server_downloads"
+python3 app.py</code></pre>
+        <p class="small text-muted">Note: The path is set only for the current terminal session.</p>
+
+    </div>
+</div>
+{% endblock %}
