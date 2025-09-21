@@ -5,10 +5,10 @@ FROM python:3.13-slim as base
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install system dependencies (curl removed to avoid network issues)
+# RUN apt-get update && apt-get install -y \
+#     curl \
+#     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
@@ -31,9 +31,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV FLASK_ENV=production
 ENV FLASK_DEBUG=0
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    && rm -rf /var/lib/apt/lists/*
+# Install runtime dependencies (curl removed)
+# RUN apt-get update && apt-get install -y \
+#     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
@@ -58,11 +58,11 @@ RUN mkdir -p downloads completed && \
 USER appuser
 
 # Expose port
-EXPOSE 5000
+EXPOSE 3000
 
-# Health check
+# Health check using Python instead of curl
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5000/login || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:3000/login')" || exit 1
 
 # Run the application with Gunicorn WSGI server
 CMD ["gunicorn", "--config", "gunicorn.conf.py", "main:application"]

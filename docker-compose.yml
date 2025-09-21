@@ -1,15 +1,14 @@
-version: '3.8'
-
 services:
   acer-pal:
     build:
       context: .
       dockerfile: Dockerfile
       target: production
+      network: host
     container_name: acer-pal-app
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "5000:3000"
     environment:
       - FLASK_ENV=production
       - FLASK_DEBUG=0
@@ -25,7 +24,7 @@ services:
     networks:
       - acer-pal-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/login"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/login')"]
       interval: 30s
       timeout: 10s
       retries: 3
