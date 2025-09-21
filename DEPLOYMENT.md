@@ -47,6 +47,17 @@ PORT=5000
 
 # API Configuration
 API_BASE_URL=https://acermovies.val.run/api
+
+# Sonarr Integration (Blackhole method)
+ENABLE_AUTO_MOVE=true
+```
+
+### Sonarr Integration
+```bash
+# For Sonarr blackhole setup
+ENABLE_AUTO_MOVE=true
+DOWNLOAD_DIRECTORY=/path/to/downloads
+COMPLETED_DIRECTORY=/path/to/completed
 ```
 
 ### Important Security Notes
@@ -100,8 +111,35 @@ tar -czf downloads_backup_$(date +%Y%m%d).tar.gz downloads/
 ## File Persistence
 
 The following directories are mounted as volumes:
-- `./downloads:/app/downloads` - Downloaded files
+- `./downloads:/app/downloads` - In-progress downloads
+- `./completed:/app/completed` - Completed downloads (Sonarr blackhole)
 - `./logs:/app/logs` - Application logs (optional)
+
+## Sonarr Integration (Blackhole Method)
+
+This downloader supports Sonarr integration via the blackhole method:
+
+1. **Enable auto-move** in `.env`:
+   ```bash
+   ENABLE_AUTO_MOVE=true
+   ```
+
+2. **Configure Sonarr**:
+   - Add a "Blackhole" download client in Sonarr
+   - Set the blackhole directory to the `completed` folder
+   - Sonarr will monitor this folder and import completed downloads
+
+3. **Directory Structure**:
+   - Downloads start in `/downloads` directory
+   - When complete, files automatically move to `/completed` directory
+   - Sonarr monitors `/completed` and processes the files
+
+4. **Docker Volume Mapping**:
+   ```yaml
+   volumes:
+     - ./downloads:/app/downloads      # Temporary downloads
+     - ./completed:/app/completed      # Sonarr blackhole directory
+   ```
 
 ## SSL/HTTPS Setup (Optional)
 

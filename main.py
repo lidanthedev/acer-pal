@@ -12,6 +12,7 @@ import re
 from datetime import datetime
 from dotenv import load_dotenv
 from functools import wraps
+import shutil
 
 # Load environment variables from .env file
 load_dotenv()
@@ -48,24 +49,30 @@ DEFAULT_HEADERS = {"Content-Type": "application/json", "Accept": "application/js
 # FIX 1: Use an absolute path for the default download directory.
 # This makes the path relative to the script's location, which is much more reliable.
 DEFAULT_DOWNLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), 'downloads'))
+DEFAULT_COMPLETED_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), 'completed'))
 
 # FEATURE 3: Read the download directory from an environment variable.
 # If 'DOWNLOAD_DIRECTORY' is not set, it falls back to the default.
 DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIRECTORY', DEFAULT_DOWNLOAD_DIR)
+COMPLETED_DIR = os.getenv('COMPLETED_DIRECTORY', DEFAULT_COMPLETED_DIR)
+
+# Sonarr blackhole configuration
+ENABLE_AUTO_MOVE = os.getenv('ENABLE_AUTO_MOVE', 'true').lower() in ['true', '1', 'yes']
 
 # --- In-memory storage for downloads ---
 download_progress = {}
 
 # --- Helper Functions ---
 
-# Create the directory if it doesn't exist
-if not os.path.exists(DOWNLOAD_DIR):
-    try:
-        os.makedirs(DOWNLOAD_DIR)
-        logger.info(f"Created download directory at: {DOWNLOAD_DIR}")
-    except OSError as e:
-        logger.error(f"FATAL: Could not create download directory at '{DOWNLOAD_DIR}'. Please check permissions. Error: {e}")
-        # In a real app, you might want to exit here if the directory is critical
+# Create the directories if they don't exist
+for directory in [DOWNLOAD_DIR, COMPLETED_DIR]:
+    if not os.path.exists(directory):
+        try:
+            os.makedirs(directory)
+            logger.info(f"Created directory at: {directory}")
+        except OSError as e:
+            logger.error(f"FATAL: Could not create directory at '{directory}'. Please check permissions. Error: {e}")
+            # In a real app, you might want to exit here if the directory is critical
         
 def sanitize_filename(filename):
     """Removes illegal characters from a filename."""
@@ -182,21 +189,45 @@ def downloads_page():
 @require_auth
 def file_manager():
     try:
-        files = []
-        for filename in sorted(os.listdir(DOWNLOAD_DIR)):
-            filepath = os.path.join(DOWNLOAD_DIR, filename)
-            if os.path.isfile(filepath):
-                file_stats = os.stat(filepath)
-                files.append({
-                    'name': filename,
-                    'size': format_size(file_stats.st_size),
-                    'modified': datetime.fromtimestamp(file_stats.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-                })
-        return render_template('file_manager.html', files=files)
+        # Get files from downloads directory
+        downloads_files = []
+        if os.path.exists(DOWNLOAD_DIR):
+            for filename in sorted(os.listdir(DOWNLOAD_DIR)):
+                filepath = os.path.join(DOWNLOAD_DIR, filename)
+                if os.path.isfile(filepath):
+                    file_stats = os.stat(filepath)
+                    downloads_files.append({
+                        'name': filename,
+                        'size': format_size(file_stats.st_size),
+                        'modified': datetime.fromtimestamp(file_stats.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                        'location': 'downloads'
+                    })
+        
+        # Get files from completed directory
+        completed_files = []
+        if os.path.exists(COMPLETED_DIR):
+            for filename in sorted(os.listdir(COMPLETED_DIR)):
+                filepath = os.path.join(COMPLETED_DIR, filename)
+                if os.path.isfile(filepath):
+                    file_stats = os.stat(filepath)
+                    completed_files.append({
+                        'name': filename,
+                        'size': format_size(file_stats.st_size),
+                        'modified': datetime.fromtimestamp(file_stats.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                        'location': 'completed'
+                    })
+        
+        return render_template('file_manager.html', 
+                             downloads_files=downloads_files, 
+                             completed_files=completed_files,
+                             auto_move_enabled=ENABLE_AUTO_MOVE)
     except Exception as e:
-        logger.error(f"File manager error: Could not read directory '{DOWNLOAD_DIR}'. Error: {e}")
-        # Pass the error to the template to be displayed to the user
-        return render_template('file_manager.html', files=None, error=f"Could not read the downloads directory: {DOWNLOAD_DIR}. Please check that it exists and the application has permission to read it.")
+        logger.error(f"File manager error: Could not read directories. Error: {e}")
+        return render_template('file_manager.html', 
+                             downloads_files=None, 
+                             completed_files=None,
+                             error=f"Could not read the directories. Please check that they exist and the application has permission to read them.",
+                             auto_move_enabled=ENABLE_AUTO_MOVE)
 
 # --- API and Action Routes ---
 # ... (start_download, list_downloads, download_file, delete_file remain the same) ...
@@ -322,26 +353,77 @@ def list_downloads():
         downloads.append({'id': download_id, 'filename': progress.get('filename', 'Unknown'), 'status': progress.get('status', 'unknown'), 'progress': f"{progress.get('progress', 0):.2f}", 'size': progress.get('size', '0 MB'), 'speed': progress.get('speed', '0 KB/s'), 'error': progress.get('error')})
     return jsonify({"downloads": downloads})
 
-@app.route('/download_file/<path:filename>')
+@app.route('/download_file/<location>/<path:filename>')
 @require_auth
-def download_file(filename):
-    return send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
+def download_file(location, filename):
+    if location == 'downloads':
+        return send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
+    elif location == 'completed':
+        return send_from_directory(COMPLETED_DIR, filename, as_attachment=True)
+    else:
+        abort(404)
 
 @app.route('/delete_file', methods=['POST'])
 @require_auth
 def delete_file():
     filename = request.form.get('filename')
-    if not filename: abort(400)
-    if '..' in filename or filename.startswith('/'): abort(400)
-    filepath = os.path.join(DOWNLOAD_DIR, filename)
+    location = request.form.get('location', 'downloads')
+    
+    if not filename: 
+        abort(400)
+    if '..' in filename or filename.startswith('/'): 
+        abort(400)
+    
+    # Determine the correct directory
+    if location == 'downloads':
+        directory = DOWNLOAD_DIR
+    elif location == 'completed':
+        directory = COMPLETED_DIR
+    else:
+        flash(f"Invalid location: {location}", "danger")
+        return redirect(url_for('file_manager'))
+    
+    filepath = os.path.join(directory, filename)
     if os.path.exists(filepath):
         try:
             os.remove(filepath)
-            flash(f"Successfully deleted '{filename}'", "success")
+            flash(f"Successfully deleted '{filename}' from {location}", "success")
         except Exception as e:
             flash(f"Error deleting '{filename}': {e}", "danger")
     else:
-        flash(f"File '{filename}' not found.", "warning")
+        flash(f"File '{filename}' not found in {location}.", "warning")
+    
+    return redirect(url_for('file_manager'))
+
+@app.route('/move_to_completed', methods=['POST'])
+@require_auth
+def move_to_completed():
+    filename = request.form.get('filename')
+    
+    if not filename:
+        abort(400)
+    if '..' in filename or filename.startswith('/'):
+        abort(400)
+    
+    source_path = os.path.join(DOWNLOAD_DIR, filename)
+    dest_path = os.path.join(COMPLETED_DIR, filename)
+    
+    if not os.path.exists(source_path):
+        flash(f"File '{filename}' not found in downloads directory.", "warning")
+        return redirect(url_for('file_manager'))
+    
+    if os.path.exists(dest_path):
+        flash(f"File '{filename}' already exists in completed directory.", "warning")
+        return redirect(url_for('file_manager'))
+    
+    try:
+        shutil.move(source_path, dest_path)
+        flash(f"Successfully moved '{filename}' to completed directory.", "success")
+        logger.info(f"Manually moved file to completed: {filename}")
+    except Exception as e:
+        flash(f"Error moving '{filename}' to completed directory: {e}", "danger")
+        logger.error(f"Failed to manually move file: {filename}, Error: {e}")
+    
     return redirect(url_for('file_manager'))
 
 # --- Download Thread Logic & Helpers (no changes needed here) ---
@@ -365,8 +447,24 @@ def download_file_thread(download_id, url, filename):
                         speed = (downloaded / elapsed) if elapsed > 0 else 0
                         progress = (downloaded / total_size * 100) if total_size > 0 else 0
                         download_progress[download_id].update({'progress': progress, 'downloaded': downloaded, 'speed': format_speed(speed), 'size': format_size(total_size)})
+        
+        # Download completed successfully
         download_progress[download_id].update({'status': 'completed', 'progress': 100})
         logger.info(f"Download completed: {download_id} - {filename}")
+        
+        # Move file to completed directory if auto-move is enabled (for Sonarr integration)
+        if ENABLE_AUTO_MOVE:
+            try:
+                completed_file_path = os.path.join(COMPLETED_DIR, filename)
+                shutil.move(file_path, completed_file_path)
+                download_progress[download_id]['status'] = 'moved_to_completed'
+                download_progress[download_id]['completed_path'] = completed_file_path
+                logger.info(f"File moved to completed directory: {filename}")
+            except Exception as e:
+                logger.error(f"Failed to move file to completed directory: {e}")
+                download_progress[download_id]['move_error'] = str(e)
+                # File stays in downloads directory if move fails
+        
     except requests.exceptions.RequestException as e:
         download_progress[download_id].update({'status': 'error', 'error': f'Network error: {str(e)}'})
     except Exception as e:

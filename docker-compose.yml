@@ -16,8 +16,10 @@ services:
     env_file:
       - .env
     volumes:
-      # Mount downloads directory for persistent storage
+      # Mount downloads directory for in-progress downloads
       - ./downloads:/app/downloads
+      # Mount completed directory for finished downloads (Sonarr blackhole)
+      - ./completed:/app/completed
       # Mount logs directory (optional)
       - ./logs:/app/logs
     networks:
@@ -61,6 +63,8 @@ networks:
 
 volumes:
   downloads:
+    driver: local
+  completed:
     driver: local
   logs:
     driver: local

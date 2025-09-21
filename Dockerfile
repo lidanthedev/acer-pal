@@ -50,8 +50,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy application code
 COPY . .
 
-# Create downloads directory and set permissions
-RUN mkdir -p downloads && \
+# Create downloads and completed directories and set permissions
+RUN mkdir -p downloads completed && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user

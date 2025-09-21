@@ -73,3 +73,7 @@ downloads/*
 
 # Nginx config (not needed in container)
 nginx/
+
+# downloads and completed files
+downloads/
+completed/
