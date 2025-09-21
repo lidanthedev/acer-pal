@@ -21,6 +21,8 @@ services:
       - /DATA/AppData/acer-pal/completed:/app/completed
       # Mount logs directory (optional)
       - /DATA/AppData/acer-pal/logs:/app/logs
+      # Mount app data file for persistence
+      - /DATA/AppData/acer-pal/app_data:/app/app_data
     networks:
       - acer-pal-network
     healthcheck:

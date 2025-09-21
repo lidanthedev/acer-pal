@@ -1,4 +1,5 @@
 # app.py
+from pathlib import Path
 from flask import Flask, request, jsonify, render_template, redirect, url_for, abort, send_from_directory, flash, session
 from Endpoint import Endpoint
 import logging
@@ -56,8 +57,8 @@ DEFAULT_COMPLETED_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 
 # FEATURE 3: Read the download directory from an environment variable.
 # If 'DOWNLOAD_DIRECTORY' is not set, it falls back to the default.
-DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIRECTORY', DEFAULT_DOWNLOAD_DIR)
-COMPLETED_DIR = os.getenv('COMPLETED_DIRECTORY', DEFAULT_COMPLETED_DIR)
+DOWNLOAD_DIR = Path(os.getenv('DOWNLOAD_DIRECTORY', DEFAULT_DOWNLOAD_DIR))
+COMPLETED_DIR = Path(os.getenv('COMPLETED_DIRECTORY', DEFAULT_COMPLETED_DIR))
 
 # Sonarr blackhole configuration
 ENABLE_AUTO_MOVE = os.getenv('ENABLE_AUTO_MOVE', 'true').lower() in ['true', '1', 'yes']
@@ -72,17 +73,44 @@ download_queue = queue.Queue()  # Queue for pending downloads
 active_downloads = set()  # Track currently active download IDs
 queue_lock = threading.Lock()  # Thread-safe operations on active_downloads
 
-# --- Helper Functions ---
+APP_DATA_FOLDER = Path('app_data')
+APP_DATA_FILE = APP_DATA_FOLDER / 'app_data.json'
 
-# Create the directories if they don't exist
-for directory in [DOWNLOAD_DIR, COMPLETED_DIR]:
-    if not os.path.exists(directory):
-        try:
-            os.makedirs(directory)
-            logger.info(f"Created directory at: {directory}")
-        except OSError as e:
-            logger.error(f"FATAL: Could not create directory at '{directory}'. Please check permissions. Error: {e}")
-            # In a real app, you might want to exit here if the directory is critical
+# --- Data Persistence Functions ---
+def save_data():
+    """Save download progress and queue state when app exits."""
+    try:
+        # TODO: Implement saving logic
+        logger.info("Saving app data...")
+        with APP_DATA_FILE.open('w') as f:
+            data_to_save = {
+                'download_progress': download_progress,
+                'download_queue': list(download_queue.queue),
+                'active_downloads': list(active_downloads)
+            }
+            json.dump(data_to_save, f)
+        logger.info("App data saved successfully.")
+    except Exception as e:
+        logger.error(f"Failed to save data: {e}")
+
+def load_data():
+    """Load download progress and queue state when app starts."""
+    try:
+        logger.info("Loading app data...")
+        if not APP_DATA_FILE.exists():
+            logger.info("No existing app data file found. Starting fresh.")
+            return
+        with APP_DATA_FILE.open('r') as f:
+            data_loaded = json.load(f)
+            download_progress.update(data_loaded.get('download_progress', {}))
+            for item in data_loaded.get('download_queue', []):
+                download_queue.put(item)
+            active_downloads.update(data_loaded.get('active_downloads', []))
+        logger.info("App data loaded successfully.")
+    except Exception as e:
+        logger.error(f"Failed to load data: {e}")
+
+# --- Helper Functions ---
         
 def sanitize_filename(filename):
     """Removes illegal characters from a filename."""
@@ -768,6 +796,23 @@ def not_found_error(error):
 
 # Create the Flask application instance for WSGI
 application = app
+
+# Load data on startup and register save on exit
+def init():
+    # Create the directories if they don't exist
+    for directory in [DOWNLOAD_DIR, COMPLETED_DIR, APP_DATA_FOLDER]:
+        if not directory.exists():
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created directory at: {directory}")
+            except OSError as e:
+                logger.error(f"FATAL: Could not create directory at '{directory}'. Please check permissions. Error: {e}")
+                # In a real app, you might want to exit here if the directory is critical
+    load_data()
+    atexit.register(save_data)
+    logger.info("Application data directories initialized.")
+
+init()
 
 if __name__ == '__main__':
     # Only run the development server when called directly
