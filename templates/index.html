@@ -17,6 +17,26 @@
                 </div>
             </form>
         </div>
+        
+        <!-- Search History Section -->
+        {% if search_history %}
+        <div class="card mt-4 shadow-sm">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-history"></i> Recent Searches
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2">
+                    {% for search in search_history %}
+                        <a href="{{ url_for('search_results', query=search) }}" class="btn btn-outline-secondary btn-sm">
+                            <i class="fas fa-search"></i> {{ search }}
+                        </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

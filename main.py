@@ -22,7 +22,7 @@ import atexit
 load_dotenv()
 
 # --- Basic Configuration ---
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -66,6 +66,7 @@ ENABLE_AUTO_MOVE = os.getenv('ENABLE_AUTO_MOVE', 'true').lower() in ['true', '1'
 # --- In-memory storage for downloads ---
 download_progress = {}
 season_processing = {}  # Track background season processing status
+search_history = []  # Track recent searches (last 5)
 
 # --- Download Queue System ---
 MAX_CONCURRENT_DOWNLOADS = 4
@@ -86,8 +87,10 @@ def save_data():
             data_to_save = {
                 'download_progress': download_progress,
                 'download_queue': list(download_queue.queue),
-                'active_downloads': list(active_downloads)
+                'active_downloads': list(active_downloads),
+                'search_history': search_history
             }
+            logger.debug(f"App data to save: {data_to_save}")
             json.dump(data_to_save, f)
         logger.info("App data saved successfully.")
     except Exception as e:
@@ -95,6 +98,7 @@ def save_data():
 
 def load_data():
     """Load download progress and queue state when app starts."""
+    global search_history
     try:
         logger.info("Loading app data...")
         if not APP_DATA_FILE.exists():
@@ -106,6 +110,7 @@ def load_data():
             for item in data_loaded.get('download_queue', []):
                 download_queue.put(item)
             active_downloads.update(data_loaded.get('active_downloads', []))
+            search_history.extend(data_loaded.get('search_history', []))
         logger.info("App data loaded successfully.")
     except Exception as e:
         logger.error(f"Failed to load data: {e}")
@@ -119,6 +124,22 @@ def sanitize_filename(filename):
     sanitized = sanitized.replace(' ', '_')
     # Limit filename length to avoid issues with file systems
     return sanitized[:200]
+
+def add_to_search_history(query):
+    """Add a search query to the search history, keeping only the last 5."""
+    global search_history
+    
+    # Remove query if it already exists to avoid duplicates
+    if query in search_history:
+        search_history.remove(query)
+    
+    # Add to the beginning of the list
+    search_history.insert(0, query)
+    
+    # Keep only the last 5 searches
+    search_history = search_history[:5]
+    
+    logger.debug(f"Updated search history: {search_history}")
 
 def extract_clean_show_name(full_title):
     """Extract just the show name from a messy torrent title."""
@@ -266,7 +287,7 @@ def logout():
 @require_auth
 def index():
     """Render the main search page."""
-    return render_template('index.html')
+    return render_template('index.html', search_history=search_history)
 
 # NEW ROUTE for the Settings Page
 @app.route('/settings')
@@ -283,6 +304,10 @@ def search_results():
     search_query = request.args.get('query')
     if not search_query:
         return redirect(url_for('index'))
+    
+    # Add to search history
+    add_to_search_history(search_query)
+    
     endpoint = Endpoint(url=f'{API_BASE_URL}/search', headers=DEFAULT_HEADERS, method='POST', payload={"searchQuery": search_query})
     try:
         response_data, status_code, _ = endpoint.fetch()

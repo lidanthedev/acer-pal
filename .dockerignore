@@ -77,3 +77,4 @@ nginx/
 # downloads and completed files
 downloads/
 completed/
+app_data/
