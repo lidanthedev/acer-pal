@@ -12,9 +12,22 @@
     <img src="{{ show.image }}" class="img-fluid rounded-start" alt="{{ show.title }}" style="max-width: 200px; object-fit: cover;">
     <div class="card-body">
         <h4 class="card-title">{{ show.title }}</h4>
-        <p class="text-muted">Choose an episode below to start the download to the server.</p>
+        <p class="text-muted">Choose an episode below to start the download to the server, or download the entire season at once.</p>
     </div>
 </div>
+
+<!-- Download All Season Button -->
+<div class="mb-4 d-grid">
+    <form action="{{ url_for('download_all_season') }}" method="POST" id="downloadAllForm" onsubmit="return confirmSeasonDownload()">
+        <input type="hidden" name="show_title" value="{{ show.title }}">
+        <input type="hidden" name="episodes_data" id="episodesData" value="">
+        <button type="submit" class="btn btn-primary btn-lg">
+            <i class="fas fa-download"></i> Download All Season ({{ episodes|length }} episodes)
+        </button>
+    </form>
+</div>
+
+<hr class="mb-4">
 
 <div class="list-group">
     {% for episode in episodes %}
@@ -34,4 +47,18 @@
         </div>
     {% endfor %}
 </div>
+
+<script>
+// Prepare episodes data for season download
+document.addEventListener('DOMContentLoaded', function() {
+    const episodesData = {{ episodes | tojson | safe }};
+    document.getElementById('episodesData').value = JSON.stringify(episodesData);
+});
+
+function confirmSeasonDownload() {
+    const episodeCount = {{ episodes|length }};
+    return confirm('Are you sure you want to download all ' + episodeCount + ' episodes from this season? This will start ' + episodeCount + ' downloads simultaneously.');
+}
+</script>
+
 {% endblock %}

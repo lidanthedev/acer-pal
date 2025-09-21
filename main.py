@@ -170,6 +170,91 @@ def start_download():
         logger.error(f"Download start error: {str(e)}")
         return f"A critical error occurred: {e}", 500
 
+@app.route('/download_all_season', methods=['POST'])
+def download_all_season():
+    """Download all episodes of a season."""
+    episodes_data = request.form.get('episodes_data')
+    show_title = request.form.get('show_title', 'Unknown_Show')
+    
+    if not episodes_data:
+        return "Error: No episodes data provided.", 400
+    
+    try:
+        import json
+        episodes = json.loads(episodes_data)
+        
+        if not episodes or not isinstance(episodes, list):
+            return "Error: Invalid episodes data.", 400
+        
+        # Start downloads for all episodes
+        download_ids = []
+        for episode in episodes:
+            episode_link = episode.get('link')
+            episode_title = episode.get('title', 'Unknown_Episode')
+            
+            if not episode_link:
+                logger.warning(f"Skipping episode with no link: {episode_title}")
+                continue
+            
+            try:
+                # Get the download URL for this episode
+                url_endpoint = Endpoint(
+                    url=f'{API_BASE_URL}/sourceUrl', 
+                    headers=DEFAULT_HEADERS, 
+                    method='POST', 
+                    payload={"url": episode_link, "seriesType": "episode"}
+                )
+                response_data, status_code, _ = url_endpoint.fetch()
+                
+                if status_code != 200 or not response_data.get('sourceUrl'):
+                    logger.error(f"Could not get download URL for episode: {episode_title}")
+                    continue
+                
+                direct_download_url = unquote(response_data['sourceUrl'])
+                safe_filename = sanitize_filename(f"{show_title}_{episode_title}.mp4")
+                download_id = str(uuid.uuid4())
+                
+                download_progress[download_id] = {
+                    'status': 'queued', 
+                    'progress': 0, 
+                    'speed': '0 KB/s', 
+                    'size': '0 MB', 
+                    'downloaded': 0, 
+                    'total': 0, 
+                    'start_time': time.time(), 
+                    'filename': safe_filename, 
+                    'error': None,
+                    'is_season_download': True
+                }
+                
+                download_ids.append(download_id)
+                
+                # Start download thread with a slight delay to avoid overwhelming the server
+                thread = threading.Thread(target=download_file_thread, args=(download_id, direct_download_url, safe_filename))
+                thread.daemon = True
+                thread.start()
+                
+                # Small delay between starting downloads
+                time.sleep(0.5)
+                
+            except Exception as e:
+                logger.error(f"Error setting up download for episode {episode_title}: {str(e)}")
+                continue
+        
+        if download_ids:
+            logger.info(f"Started season download with {len(download_ids)} episodes for: {show_title}")
+            flash(f"Started downloading {len(download_ids)} episodes from the season!", "success")
+        else:
+            flash("No episodes could be queued for download.", "warning")
+            
+        return redirect(url_for('downloads_page'))
+        
+    except json.JSONDecodeError:
+        return "Error: Invalid JSON data for episodes.", 400
+    except Exception as e:
+        logger.error(f"Season download error: {str(e)}")
+        return f"A critical error occurred while starting season download: {e}", 500
+
 @app.route('/downloads', methods=['GET'])
 def list_downloads():
     downloads = []
