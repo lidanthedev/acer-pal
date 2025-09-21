@@ -61,6 +61,7 @@ ENABLE_AUTO_MOVE = os.getenv('ENABLE_AUTO_MOVE', 'true').lower() in ['true', '1'
 
 # --- In-memory storage for downloads ---
 download_progress = {}
+season_processing = {}  # Track background season processing status
 
 # --- Helper Functions ---
 
@@ -82,18 +83,73 @@ def sanitize_filename(filename):
     # Limit filename length to avoid issues with file systems
     return sanitized[:200]
 
+def extract_clean_show_name(full_title):
+    """Extract just the show name from a messy torrent title."""
+    logger.info(f"Extracting clean show name from: '{full_title}'")
+    
+    # Common patterns to extract show name from torrent titles
+    # Try different patterns in order of specificity
+    
+    # Pattern 1: Show Name (Season X...) or Show Name (Complete Series)
+    pattern1 = re.match(r'^([^(]+?)\s*\([Ss]eason|^([^(]+?)\s*\([Cc]omplete', full_title)
+    if pattern1:
+        show_name = (pattern1.group(1) or pattern1.group(2)).strip()
+        logger.info(f"Pattern 1 matched: '{show_name}'")
+        return clean_show_title_string(show_name)
+    
+    # Pattern 2: Show Name - Season X or Show Name Season X
+    pattern2 = re.match(r'^(.*?)\s*[-–]\s*[Ss]eason\s*\d+|^(.*?)\s+[Ss]eason\s*\d+', full_title)
+    if pattern2:
+        show_name = (pattern2.group(1) or pattern2.group(2)).strip()
+        logger.info(f"Pattern 2 matched: '{show_name}'")
+        return clean_show_title_string(show_name)
+    
+    # Pattern 3: Show Name S01-S12 or Show Name S01E01
+    pattern3 = re.match(r'^(.*?)\s*S\d+', full_title, re.IGNORECASE)
+    if pattern3:
+        show_name = pattern3.group(1).strip()
+        logger.info(f"Pattern 3 matched: '{show_name}'")
+        return clean_show_title_string(show_name)
+    
+    # Pattern 4: Remove common quality/format indicators from the end and take the first part
+    # Remove things like [720p], {English}, (2019), etc.
+    cleaned = re.sub(r'\s*[\[\({].*?[\]\)}]\s*', ' ', full_title)
+    # Remove quality indicators
+    cleaned = re.sub(r'\s*(720p|1080p|4K|HDTV|BluRay|WEB-DL|REMUX).*$', '', cleaned, flags=re.IGNORECASE)
+    # Take everything before the first season indicator or year
+    cleaned = re.sub(r'\s*(S\d+|Season\s*\d+|\d{4}).*$', '', cleaned, flags=re.IGNORECASE)
+    
+    show_name = cleaned.strip()
+    if show_name:
+        logger.info(f"Pattern 4 (cleanup) matched: '{show_name}'")
+        return clean_show_title_string(show_name)
+    
+    # Fallback: just clean the original
+    logger.warning(f"No pattern matched, using fallback for: '{full_title}'")
+    return clean_show_title_string(full_title)
+
+def clean_show_title_string(title):
+    """Clean a show title string for filename use."""
+    # Remove invalid filename characters
+    cleaned = re.sub(r'[\\/*?:"<>|]', '', title)
+    # Replace spaces with dots, but clean up multiple dots
+    cleaned = cleaned.replace(' ', '.')
+    cleaned = re.sub(r'\.+', '.', cleaned)  # Replace multiple dots with single dot
+    # Remove leading/trailing dots
+    cleaned = cleaned.strip('.')
+    return cleaned
+
 def create_episode_filename_from_context(show_title, episode_title, selected_quality, original_filename):
     """Create a clean, simple episode filename: Show.Title.S##E##.Quality.ext"""
+    logger.info(f"Creating episode filename from context: show_title='{show_title}', episode_title='{episode_title}', selected_quality='{selected_quality}', original_filename='{original_filename}'")
     try:
         # Extract file extension from original filename
         _, ext = os.path.splitext(original_filename)
         if not ext or ext in ['.720p', '.1080p', '.4K']:  # Handle cases where quality is mistaken for extension
             ext = '.mp4'
         
-        # Clean show title - replace spaces with dots and remove invalid characters
-        clean_show_title = show_title.strip()
-        clean_show_title = re.sub(r'[\\/*?:"<>|]', '', clean_show_title)
-        clean_show_title = clean_show_title.replace(' ', '.')
+        # Extract just the actual show name from the potentially messy title
+        clean_show_title = extract_clean_show_name(show_title.strip())
         
         # Extract season and episode from episode_title
         season_num = 1  # default
@@ -333,29 +389,40 @@ def start_download():
         logger.error(f"Download start error: {str(e)}")
         return f"A critical error occurred: {e}", 500
 
-@app.route('/download_all_season', methods=['POST'])
-@require_auth
-def download_all_season():
-    """Download all episodes of a season."""
-    episodes_data = request.form.get('episodes_data')
-    show_title = request.form.get('show_title', 'Unknown_Show')
-    selected_quality = request.form.get('selected_quality')
-    
-    if not episodes_data:
-        return "Error: No episodes data provided.", 400
+def process_season_downloads_background(episodes_data, show_title, selected_quality):
+    """Process all season episodes in background to avoid worker timeout."""
+    processing_id = str(uuid.uuid4())
     
     try:
         import json
         episodes = json.loads(episodes_data)
         
         if not episodes or not isinstance(episodes, list):
-            return "Error: Invalid episodes data.", 400
+            logger.error("Invalid episodes data for season download")
+            return
+        
+        # Track season processing status
+        season_processing[processing_id] = {
+            'show_title': show_title,
+            'total_episodes': len(episodes),
+            'processed_episodes': 0,
+            'successful_downloads': 0,
+            'start_time': time.time(),
+            'status': 'processing'
+        }
+        
+        logger.info(f"Processing season download in background: {show_title} ({len(episodes)} episodes)")
         
         # Start downloads for all episodes
         download_ids = []
-        for episode in episodes:
+        successful_downloads = 0
+        
+        for i, episode in enumerate(episodes):
             episode_link = episode.get('link')
             episode_title = episode.get('title', 'Unknown_Episode')
+            
+            # Update processing status
+            season_processing[processing_id]['processed_episodes'] = i + 1
             
             if not episode_link:
                 logger.warning(f"Skipping episode with no link: {episode_title}")
@@ -393,7 +460,8 @@ def download_all_season():
                     'start_time': time.time(), 
                     'filename': safe_filename, 
                     'error': None,
-                    'is_season_download': True
+                    'is_season_download': True,
+                    'season_processing_id': processing_id
                 }
                 
                 download_ids.append(download_id)
@@ -403,6 +471,10 @@ def download_all_season():
                 thread.daemon = True
                 thread.start()
                 
+                successful_downloads += 1
+                season_processing[processing_id]['successful_downloads'] = successful_downloads
+                logger.info(f"Started download {successful_downloads}/{len(episodes)}: {safe_filename}")
+                
                 # Small delay between starting downloads
                 time.sleep(0.5)
                 
@@ -410,19 +482,63 @@ def download_all_season():
                 logger.error(f"Error setting up download for episode {episode_title}: {str(e)}")
                 continue
         
-        if download_ids:
-            logger.info(f"Started season download with {len(download_ids)} episodes for: {show_title}")
-            flash(f"Started downloading {len(download_ids)} episodes from the season!", "success")
-        else:
-            flash("No episodes could be queued for download.", "warning")
-            
+        # Mark processing as completed
+        season_processing[processing_id]['status'] = 'completed'
+        season_processing[processing_id]['end_time'] = time.time()
+        
+        logger.info(f"Completed season download setup: {successful_downloads} episodes queued for {show_title}")
+        
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON data for episodes in background processing")
+        if processing_id in season_processing:
+            season_processing[processing_id]['status'] = 'error'
+            season_processing[processing_id]['error'] = 'Invalid JSON data'
+    except Exception as e:
+        logger.error(f"Season background processing error: {str(e)}")
+        if processing_id in season_processing:
+            season_processing[processing_id]['status'] = 'error'
+            season_processing[processing_id]['error'] = str(e)
+
+@app.route('/download_all_season', methods=['POST'])
+@require_auth
+def download_all_season():
+    """Download all episodes of a season - starts background processing and redirects immediately."""
+    episodes_data = request.form.get('episodes_data')
+    show_title = request.form.get('show_title', 'Unknown_Show')
+    selected_quality = request.form.get('selected_quality')
+    
+    if not episodes_data:
+        flash("Error: No episodes data provided.", "error")
+        return redirect(url_for('index'))
+    
+    try:
+        import json
+        episodes = json.loads(episodes_data)
+        
+        if not episodes or not isinstance(episodes, list):
+            flash("Error: Invalid episodes data.", "error")
+            return redirect(url_for('index'))
+        
+        # Start background processing
+        thread = threading.Thread(
+            target=process_season_downloads_background, 
+            args=(episodes_data, show_title, selected_quality)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        flash(f"Started processing {len(episodes)} episodes from {show_title} in the background. Downloads will appear in the downloads page as they are prepared.", "info")
+        logger.info(f"Started background season processing for: {show_title} ({len(episodes)} episodes)")
+        
         return redirect(url_for('downloads_page'))
         
     except json.JSONDecodeError:
-        return "Error: Invalid JSON data for episodes.", 400
+        flash("Error: Invalid episode data format.", "error")
+        return redirect(url_for('index'))
     except Exception as e:
         logger.error(f"Season download error: {str(e)}")
-        return f"A critical error occurred while starting season download: {e}", 500
+        flash(f"Error starting season download: {str(e)}", "error")
+        return redirect(url_for('index'))
 
 @app.route('/downloads', methods=['GET'])
 @require_auth
@@ -432,7 +548,25 @@ def list_downloads():
     for download_id in sorted_ids:
         progress = download_progress[download_id]
         downloads.append({'id': download_id, 'filename': progress.get('filename', 'Unknown'), 'status': progress.get('status', 'unknown'), 'progress': f"{progress.get('progress', 0):.2f}", 'size': progress.get('size', '0 MB'), 'speed': progress.get('speed', '0 KB/s'), 'error': progress.get('error')})
-    return jsonify({"downloads": downloads})
+    
+    # Add season processing status
+    season_processing_list = []
+    for processing_id, processing_info in season_processing.items():
+        season_processing_list.append({
+            'id': processing_id,
+            'show_title': processing_info.get('show_title', 'Unknown'),
+            'status': processing_info.get('status', 'unknown'),
+            'processed_episodes': processing_info.get('processed_episodes', 0),
+            'total_episodes': processing_info.get('total_episodes', 0),
+            'successful_downloads': processing_info.get('successful_downloads', 0),
+            'start_time': processing_info.get('start_time', 0),
+            'error': processing_info.get('error')
+        })
+    
+    return jsonify({
+        "downloads": downloads,
+        "season_processing": season_processing_list
+    })
 
 @app.route('/download_file/<location>/<path:filename>')
 @require_auth
@@ -536,7 +670,7 @@ def download_file_thread(download_id, url, filename):
                         download_progress[download_id].update({'progress': progress, 'downloaded': downloaded, 'speed': format_speed(speed), 'size': format_size(total_size)})
         
         # Download completed successfully - file should already have our clean filename
-        download_progress[download_id].update({'status': 'completed', 'progress': 100})
+        download_progress[download_id].update({'status': 'moving', 'progress': 100})
         logger.info(f"Download completed with clean filename: {download_id} - {filename}")
         
         # Verify the file exists with our expected name
@@ -550,7 +684,7 @@ def download_file_thread(download_id, url, filename):
             try:
                 completed_file_path = os.path.join(COMPLETED_DIR, filename)
                 shutil.move(file_path, completed_file_path)
-                download_progress[download_id]['status'] = 'moved_to_completed'
+                download_progress[download_id]['status'] = 'completed'
                 download_progress[download_id]['completed_path'] = completed_file_path
                 logger.info(f"File moved to completed directory: {filename}")
             except Exception as e:
