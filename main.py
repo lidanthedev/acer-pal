@@ -574,6 +574,48 @@ def download_all_season():
         flash(f"Error starting season download: {str(e)}", "error")
         return redirect(url_for('index'))
 
+@app.route('/download_selected_episodes', methods=['POST'])
+@require_auth
+def download_selected_episodes():
+    """Download user-selected episodes from a season."""
+    selected_episodes_data = request.form.get('selected_episodes')
+    show_title = request.form.get('show_title', 'Unknown_Show')
+    selected_quality = request.form.get('selected_quality')
+    
+    if not selected_episodes_data:
+        flash("Error: No episodes selected.", "error")
+        return redirect(url_for('index'))
+    
+    try:
+        import json
+        selected_episodes = json.loads(selected_episodes_data)
+        
+        if not selected_episodes or not isinstance(selected_episodes, list):
+            flash("Error: Invalid episode selection data.", "error")
+            return redirect(url_for('index'))
+        
+        # Start background processing for selected episodes
+        thread = threading.Thread(
+            target=process_season_downloads_background, 
+            args=(selected_episodes_data, show_title, selected_quality)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        episode_count = len(selected_episodes)
+        flash(f"Started processing {episode_count} selected episode{'s' if episode_count != 1 else ''} from {show_title} in the background. Downloads will appear in the downloads page as they are prepared.", "info")
+        logger.info(f"Started background processing for {episode_count} selected episodes: {show_title}")
+        
+        return redirect(url_for('downloads_page'))
+        
+    except json.JSONDecodeError:
+        flash("Error: Invalid episode selection format.", "error")
+        return redirect(url_for('index'))
+    except Exception as e:
+        logger.error(f"Selected episodes download error: {str(e)}")
+        flash(f"Error starting selected episodes download: {str(e)}", "error")
+        return redirect(url_for('index'))
+
 @app.route('/downloads', methods=['GET'])
 @require_auth
 def list_downloads():

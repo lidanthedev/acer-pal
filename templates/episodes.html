@@ -20,18 +20,32 @@
     <img src="{{ show.image }}" class="img-fluid rounded-start" alt="{{ show.title }}" style="max-width: 200px; object-fit: cover;">
     <div class="card-body">
         <h4 class="card-title">{{ show.title }}</h4>
-        <p class="text-muted">Choose an episode below to start the download to the server, or download the entire season at once.</p>
+        <p class="text-muted">Select episodes to download individually or use "Select All" to download the entire season.</p>
     </div>
 </div>
 
-<!-- Download All Season Button -->
-<div class="mb-4 d-grid">
-    <form action="{{ url_for('download_all_season') }}" method="POST" id="downloadAllForm" onsubmit="return confirmSeasonDownload()">
+<!-- Episode Selection Controls -->
+<div class="mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="selectAll()">
+                <i class="fas fa-check-square"></i> Select All
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm ms-2" onclick="selectNone()">
+                <i class="fas fa-square"></i> Select None
+            </button>
+        </div>
+        <div>
+            <span id="selectedCount" class="text-muted">0 episodes selected</span>
+        </div>
+    </div>
+    
+    <form action="{{ url_for('download_selected_episodes') }}" method="POST" id="downloadSelectedForm">
         <input type="hidden" name="show_title" value="{{ show.title }}">
         <input type="hidden" name="selected_quality" value="{{ selected_quality }}">
-        <input type="hidden" name="episodes_data" id="episodesData" value="">
-        <button type="submit" class="btn btn-primary btn-lg">
-            <i class="fas fa-download"></i> Download All Season ({{ episodes|length }} episodes)
+        <input type="hidden" name="selected_episodes" id="selectedEpisodes" value="">
+        <button type="submit" class="btn btn-success btn-lg w-100" id="downloadBtn" disabled>
+            <i class="fas fa-download"></i> Download Selected Episodes
         </button>
     </form>
 </div>
@@ -40,37 +54,76 @@
 
 <div class="list-group">
     {% for episode in episodes %}
-        <div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
-            
-            <span>{{ episode.title }}</span>
-
-            <form action="{{ url_for('start_download') }}" method="POST" class="mb-0">
-                <!-- This link will be used to get the final download URL -->
-                <input type="hidden" name="source_api_url" value="{{ episode.link }}">
-                <!-- Pass structured information for better filename formatting -->
-                <input type="hidden" name="show_title" value="{{ show.title }}">
-                <input type="hidden" name="episode_title" value="{{ episode.title }}">
-                <input type="hidden" name="selected_quality" value="{{ selected_quality }}">
-                <input type="hidden" name="filename" value="{{ show.title }}_{{ episode.title }}.mp4">
-                <input type="hidden" name="seriesType" value="episode">
-                <button type="submit" class="btn btn-success">Download to Server</button>
-            </form>
-
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+            <div class="form-check d-flex align-items-center">
+                <input class="form-check-input me-3" type="checkbox" 
+                       id="episode{{ loop.index }}" 
+                       name="episode_checkbox" 
+                       value="{{ episode.link }}"
+                       data-title="{{ episode.title }}"
+                       onchange="updateSelection()">
+                <label class="form-check-label flex-grow-1" for="episode{{ loop.index }}">
+                    {{ episode.title }}
+                </label>
+            </div>
+            <span class="badge bg-secondary">Episode {{ loop.index }}</span>
         </div>
     {% endfor %}
 </div>
 
 <script>
-// Prepare episodes data for season download
-document.addEventListener('DOMContentLoaded', function() {
-    const episodesData = {{ episodes | tojson | safe }};
-    document.getElementById('episodesData').value = JSON.stringify(episodesData);
-});
-
-function confirmSeasonDownload() {
-    const episodeCount = {{ episodes|length }};
-    return confirm('Are you sure you want to download all ' + episodeCount + ' episodes from this season? This will start ' + episodeCount + ' downloads simultaneously.');
+// Episode selection functionality
+function selectAll() {
+    const checkboxes = document.querySelectorAll('input[name="episode_checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+    });
+    updateSelection();
 }
+
+function selectNone() {
+    const checkboxes = document.querySelectorAll('input[name="episode_checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    updateSelection();
+}
+
+function updateSelection() {
+    const checkboxes = document.querySelectorAll('input[name="episode_checkbox"]:checked');
+    const selectedCount = checkboxes.length;
+    const downloadBtn = document.getElementById('downloadBtn');
+    const selectedCountSpan = document.getElementById('selectedCount');
+    
+    // Update selected count display
+    selectedCountSpan.textContent = selectedCount + ' episode' + (selectedCount !== 1 ? 's' : '') + ' selected';
+    
+    // Enable/disable download button
+    downloadBtn.disabled = selectedCount === 0;
+    
+    // Update button text
+    if (selectedCount === 0) {
+        downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download Selected Episodes';
+    } else {
+        downloadBtn.innerHTML = '<i class="fas fa-download"></i> Download ' + selectedCount + ' Selected Episode' + (selectedCount !== 1 ? 's' : '');
+    }
+    
+    // Prepare selected episodes data
+    const selectedEpisodes = [];
+    checkboxes.forEach(checkbox => {
+        selectedEpisodes.push({
+            link: checkbox.value,
+            title: checkbox.getAttribute('data-title')
+        });
+    });
+    
+    document.getElementById('selectedEpisodes').value = JSON.stringify(selectedEpisodes);
+}
+
+// Initialize selection state on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateSelection();
+});
 </script>
 
 {% endblock %}
