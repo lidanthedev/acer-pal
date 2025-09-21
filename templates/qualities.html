@@ -38,6 +38,8 @@
                     <input type="hidden" name="source_api_url" value="{{ quality.url }}">
                     <input type="hidden" name="filename" value="{{ movie.title }}_{{ quality.quality }}.mp4">
                     <input type="hidden" name="seriesType" value="movie">
+                    <input type="hidden" name="show_title" value="{{ movie.title }}">
+                    <input type="hidden" name="selected_quality" value="{{ quality.title }}">
                     <button type="submit" class="btn btn-success">Download Movie</button>
                 </form>
             {% endif %}

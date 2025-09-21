@@ -1,6 +1,6 @@
 # app.py
 from pathlib import Path
-from flask import Flask, request, jsonify, render_template, redirect, url_for, abort, send_from_directory, flash, session
+from flask import Flask, request, jsonify, render_template, redirect, url_for, abort, send_from_directory, flash, session, g
 from Endpoint import Endpoint
 import logging
 import threading
@@ -292,6 +292,41 @@ def create_episode_filename_from_context(show_title, episode_title, selected_qua
         # Fall back to original sanitization
         return sanitize_filename(original_filename)
 
+def create_movie_filename_from_context(movie_title, selected_quality, original_filename):
+    """Create a clean movie filename from UI context by removing file size brackets."""
+    logger.info(f"Creating movie filename from context: movie_title='{movie_title}', selected_quality='{selected_quality}'")
+    try:
+        # Extract file extension from original filename
+        _, ext = os.path.splitext(original_filename)
+        if not ext or ext in ['.720p', '.1080p', '.4K']:  # Handle cases where quality is mistaken for extension
+            ext = '.mp4'
+        
+        # Use the selected_quality (UI context) which is already clean
+        # Just remove file size information in brackets like [1.8GB], [470MB], etc.
+        clean_title = selected_quality.strip()
+        
+        # Remove file size brackets: [1.8GB], [470MB], [2.6GB], etc.
+        clean_title = re.sub(r'\s*\[[^\]]*(?:MB|GB|KB)\][^\]]*', '', clean_title, flags=re.IGNORECASE)
+        
+        # Remove any remaining empty brackets or extra spaces
+        clean_title = re.sub(r'\s*\[\s*\]\s*', '', clean_title)
+        clean_title = re.sub(r'\s+', ' ', clean_title).strip()
+        
+        # Sanitize for filesystem
+        safe_title = clean_title.replace(':', ' -').replace('/', ' ').replace('\\', ' ')
+        safe_title = re.sub(r'[<>"|?*]', '', safe_title)
+        safe_title = re.sub(r'\s+', ' ', safe_title).strip()
+        
+        formatted_filename = f"{safe_title}{ext}"
+        
+        logger.info(f"Movie filename: '{selected_quality}' -> '{formatted_filename}'")
+        return formatted_filename
+        
+    except Exception as e:
+        logger.warning(f"Failed to create movie filename from context: {e}")
+        # Fall back to original sanitization
+        return sanitize_filename(original_filename)
+
 # --- Authentication Routes ---
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -471,7 +506,10 @@ def start_download():
         # Create smart filename based on context
         if series_type == 'episode' and show_title and episode_title and selected_quality:
             safe_filename = create_episode_filename_from_context(show_title, episode_title, selected_quality, filename)
-            logger.info(f"Generated clean filename: {safe_filename}")
+            logger.info(f"Generated clean episode filename: {safe_filename}")
+        elif series_type == 'movie' and show_title and selected_quality:
+            safe_filename = create_movie_filename_from_context(show_title, selected_quality, filename)
+            logger.info(f"Generated clean movie filename: {safe_filename}")
         else:
             safe_filename = sanitize_filename(filename)
             logger.info(f"Using sanitized filename: {safe_filename}")
