@@ -21,11 +21,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.secret_key = 'your_super_secret_key_change_me'
+app.secret_key = os.getenv('SECRET_KEY', 'your_super_secret_key_change_me')
 
 # --- Authentication Configuration ---
 AUTH_USERNAME = os.getenv('AUTH_USERNAME', 'admin')
 AUTH_PASSWORD = os.getenv('AUTH_PASSWORD', 'password123')
+
+# --- Server Configuration ---
+HOST = os.getenv('HOST', '0.0.0.0')
+PORT = int(os.getenv('PORT', 5000))
+DEBUG = os.getenv('FLASK_DEBUG', '0').lower() in ['true', '1', 'yes']
 
 def require_auth(f):
     """Decorator to require basic authentication for routes."""
@@ -38,7 +43,7 @@ def require_auth(f):
 
 
 # --- Constants & Configuration ---
-API_BASE_URL = 'https://acermovies.val.run/api'
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://acermovies.val.run/api')
 DEFAULT_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 # FIX 1: Use an absolute path for the default download directory.
 # This makes the path relative to the script's location, which is much more reliable.
@@ -381,4 +386,4 @@ def not_found_error(error):
     return render_template('404.html'), 404
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=DEBUG, host=HOST, port=PORT)

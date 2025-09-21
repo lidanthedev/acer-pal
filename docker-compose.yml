@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  acer-pal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: acer-pal-app
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
+    env_file:
+      - .env
+    volumes:
+      # Mount downloads directory for persistent storage
+      - ./downloads:/app/downloads
+      # Mount logs directory (optional)
+      - ./logs:/app/logs
+    networks:
+      - acer-pal-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # Optional: Nginx reverse proxy for production
+  nginx:
+    image: nginx:alpine
+    container_name: acer-pal-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - acer-pal
+    networks:
+      - acer-pal-network
+    profiles:
+      - with-nginx
+
+networks:
+  acer-pal-network:
+    driver: bridge
+
+volumes:
+  downloads:
+    driver: local
+  logs:
+    driver: local
