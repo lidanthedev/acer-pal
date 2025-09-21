@@ -48,3 +48,15 @@ enable_stdio_inheritance = True
 # SSL (if needed - commented out by default)
 # keyfile = "/path/to/keyfile"
 # certfile = "/path/to/certfile"
+
+# Worker hooks
+def worker_exit(server, worker):
+    """Called when a worker exits. Save data to prevent loss."""
+    try:
+        # Import the save function from the main module
+        from main import save_data
+        save_data()
+    except Exception as e:
+        # Log error but don't fail worker exit
+        import logging
+        logging.getLogger(__name__).error(f"Error saving data during worker exit: {e}")

@@ -17,7 +17,6 @@ import shutil
 import queue
 import json
 import fcntl  # For file locking
-import atexit
 
 # Load environment variables from .env file
 load_dotenv()
@@ -962,9 +961,6 @@ def init():
                 # In a real app, you might want to exit here if the directory is critical
     
     load_data()
-    
-    # Register save_data only once
-    atexit.register(save_data)
     
     logger.info("Application data directories initialized.")
 
