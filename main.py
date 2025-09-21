@@ -13,6 +13,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from functools import wraps
 import shutil
+import queue
 
 # Load environment variables from .env file
 load_dotenv()
@@ -62,6 +63,12 @@ ENABLE_AUTO_MOVE = os.getenv('ENABLE_AUTO_MOVE', 'true').lower() in ['true', '1'
 # --- In-memory storage for downloads ---
 download_progress = {}
 season_processing = {}  # Track background season processing status
+
+# --- Download Queue System ---
+MAX_CONCURRENT_DOWNLOADS = 4
+download_queue = queue.Queue()  # Queue for pending downloads
+active_downloads = set()  # Track currently active download IDs
+queue_lock = threading.Lock()  # Thread-safe operations on active_downloads
 
 # --- Helper Functions ---
 
@@ -380,10 +387,9 @@ def start_download():
         
         download_id = str(uuid.uuid4())
         download_progress[download_id] = {'status': 'starting', 'progress': 0, 'speed': '0 KB/s', 'size': '0 MB', 'downloaded': 0, 'total': 0, 'start_time': time.time(), 'filename': safe_filename, 'error': None}
-        thread = threading.Thread(target=download_file_thread, args=(download_id, direct_download_url, safe_filename))
-        thread.daemon = True
-        thread.start()
-        logger.info(f"Download started: {download_id} - {safe_filename}")
+        queue_download(download_id, direct_download_url, safe_filename)
+        logger.info(f"Download queued: {download_id} - {safe_filename}")
+        return redirect(url_for('downloads_page'))
         return redirect(url_for('downloads_page'))
     except Exception as e:
         logger.error(f"Download start error: {str(e)}")
@@ -466,17 +472,15 @@ def process_season_downloads_background(episodes_data, show_title, selected_qual
                 
                 download_ids.append(download_id)
                 
-                # Start download thread with a slight delay to avoid overwhelming the server
-                thread = threading.Thread(target=download_file_thread, args=(download_id, direct_download_url, safe_filename))
-                thread.daemon = True
-                thread.start()
+                # Queue download instead of starting immediately to respect concurrency limits
+                queue_download(download_id, direct_download_url, safe_filename)
                 
                 successful_downloads += 1
                 season_processing[processing_id]['successful_downloads'] = successful_downloads
-                logger.info(f"Started download {successful_downloads}/{len(episodes)}: {safe_filename}")
+                logger.info(f"Queued download {successful_downloads}/{len(episodes)}: {safe_filename}")
                 
-                # Small delay between starting downloads
-                time.sleep(0.5)
+                # Small delay between queuing downloads
+                time.sleep(0.2)
                 
             except Exception as e:
                 logger.error(f"Error setting up download for episode {episode_title}: {str(e)}")
@@ -565,7 +569,13 @@ def list_downloads():
     
     return jsonify({
         "downloads": downloads,
-        "season_processing": season_processing_list
+        "season_processing": season_processing_list,
+        "queue_status": {
+            "active_downloads": len(active_downloads),
+            "max_concurrent": MAX_CONCURRENT_DOWNLOADS,
+            "queued_downloads": download_queue.qsize(),
+            "available_slots": MAX_CONCURRENT_DOWNLOADS - len(active_downloads)
+        }
     })
 
 @app.route('/download_file/<location>/<path:filename>')
@@ -642,6 +652,50 @@ def move_to_completed():
     return redirect(url_for('file_manager'))
 
 # --- Download Thread Logic & Helpers (no changes needed here) ---
+
+def queue_download(download_id, url, filename):
+    """Add a download to the queue or start it immediately if slots are available."""
+    with queue_lock:
+        if len(active_downloads) < MAX_CONCURRENT_DOWNLOADS:
+            # Start download immediately
+            active_downloads.add(download_id)
+            download_progress[download_id]['status'] = 'downloading'
+            thread = threading.Thread(target=managed_download_thread, args=(download_id, url, filename))
+            thread.daemon = True
+            thread.start()
+            logger.info(f"Started download immediately: {download_id} -> {filename}")
+        else:
+            # Add to queue
+            download_queue.put((download_id, url, filename))
+            download_progress[download_id]['status'] = 'queued'
+            logger.info(f"Queued download: {download_id} -> {filename} (Queue size: {download_queue.qsize()})")
+
+def process_download_queue():
+    """Process the download queue when a slot becomes available."""
+    with queue_lock:
+        while len(active_downloads) < MAX_CONCURRENT_DOWNLOADS and not download_queue.empty():
+            try:
+                download_id, url, filename = download_queue.get_nowait()
+                active_downloads.add(download_id)
+                download_progress[download_id]['status'] = 'downloading'
+                thread = threading.Thread(target=managed_download_thread, args=(download_id, url, filename))
+                thread.daemon = True
+                thread.start()
+                logger.info(f"Started queued download: {download_id} -> {filename} (Queue size: {download_queue.qsize()})")
+            except queue.Empty:
+                break
+
+def managed_download_thread(download_id, url, filename):
+    """Wrapper for download_file_thread that manages the active downloads set."""
+    try:
+        download_file_thread(download_id, url, filename)
+    finally:
+        # Always remove from active downloads when done, regardless of success/failure
+        with queue_lock:
+            active_downloads.discard(download_id)
+        # Process queue to start next download
+        process_download_queue()
+
 def download_file_thread(download_id, url, filename):
     try:
         download_progress[download_id]['status'] = 'downloading'
