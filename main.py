@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from functools import wraps
 import shutil
 import queue
+import json
+import atexit
 
 # Load environment variables from .env file
 load_dotenv()

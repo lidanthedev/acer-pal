@@ -11,12 +11,14 @@ backlog = 2048
 workers = int(os.getenv('GUNICORN_WORKERS', '1'))
 worker_class = "sync"
 worker_connections = 1000
-timeout = int(os.getenv('GUNICORN_TIMEOUT', '30'))
+# Worker timeout - increased for background downloads to prevent worker kills
+timeout = int(os.getenv('GUNICORN_TIMEOUT', '120'))
 keepalive = int(os.getenv('GUNICORN_KEEPALIVE', '2'))
 
 # Restart workers after this many requests, to help prevent memory leaks
-max_requests = 1000
-max_requests_jitter = 100
+# Increased from 1000 to prevent worker restarts during long downloads
+max_requests = 10000
+max_requests_jitter = 1000
 
 # Logging
 loglevel = "info"
