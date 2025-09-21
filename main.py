@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, request, jsonify, render_template, redirect, url_for, abort, send_from_directory, flash
+from flask import Flask, request, jsonify, render_template, redirect, url_for, abort, send_from_directory, flash, session
 from Endpoint import Endpoint
 import logging
 import threading
@@ -10,6 +10,11 @@ import requests
 from urllib.parse import unquote
 import re
 from datetime import datetime
+from dotenv import load_dotenv
+from functools import wraps
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- Basic Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -17,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = 'your_super_secret_key_change_me'
+
+# --- Authentication Configuration ---
+AUTH_USERNAME = os.getenv('AUTH_USERNAME', 'admin')
+AUTH_PASSWORD = os.getenv('AUTH_PASSWORD', 'password123')
+
+def require_auth(f):
+    """Decorator to require basic authentication for routes."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'authenticated' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 # --- Constants & Configuration ---
@@ -51,15 +69,42 @@ def sanitize_filename(filename):
     # Limit filename length to avoid issues with file systems
     return sanitized[:200]
 
+# --- Authentication Routes ---
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Handle user authentication."""
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if username == AUTH_USERNAME and password == AUTH_PASSWORD:
+            session['authenticated'] = True
+            flash('Successfully logged in!', 'success')
+            return redirect(url_for('index'))
+        else:
+            flash('Invalid username or password!', 'danger')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """Handle user logout."""
+    session.pop('authenticated', None)
+    flash('Successfully logged out!', 'info')
+    return redirect(url_for('login'))
+
 # --- Page Rendering Routes ---
 
 @app.route('/')
+@require_auth
 def index():
     """Render the main search page."""
     return render_template('index.html')
 
 # NEW ROUTE for the Settings Page
 @app.route('/settings')
+@require_auth
 def settings():
     """Render the settings information page."""
     # Pass the currently configured download directory to the template
@@ -67,6 +112,7 @@ def settings():
     
 # ... (all other routes like /search, /qualities, /episodes remain the same) ...
 @app.route('/search')
+@require_auth
 def search_results():
     search_query = request.args.get('query')
     if not search_query:
@@ -83,6 +129,7 @@ def search_results():
         return render_template('results.html', results=[], query=search_query, error=f"An error occurred: {e}")
 
 @app.route('/qualities', methods=['POST'])
+@require_auth
 def select_quality():
     movie_url = request.form.get('url')
     movie_title = request.form.get('title')
@@ -102,6 +149,7 @@ def select_quality():
         return f"An error occurred while fetching qualities: {e}", 500
 
 @app.route('/episodes', methods=['POST'])
+@require_auth
 def list_episodes():
     episodes_api_url = request.form.get('episodes_api_url')
     show_title = request.form.get('title')
@@ -121,10 +169,12 @@ def list_episodes():
         return f"An error occurred while fetching episodes: {e}", 500
 
 @app.route('/downloads_page')
+@require_auth
 def downloads_page():
     return render_template('downloads.html')
 
 @app.route('/file_manager')
+@require_auth
 def file_manager():
     try:
         files = []
@@ -146,6 +196,7 @@ def file_manager():
 # --- API and Action Routes ---
 # ... (start_download, list_downloads, download_file, delete_file remain the same) ...
 @app.route('/download', methods=['POST'])
+@require_auth
 def start_download():
     source_api_url = request.form.get('source_api_url')
     filename = request.form.get('filename', 'download.mp4')
@@ -171,6 +222,7 @@ def start_download():
         return f"A critical error occurred: {e}", 500
 
 @app.route('/download_all_season', methods=['POST'])
+@require_auth
 def download_all_season():
     """Download all episodes of a season."""
     episodes_data = request.form.get('episodes_data')
@@ -256,6 +308,7 @@ def download_all_season():
         return f"A critical error occurred while starting season download: {e}", 500
 
 @app.route('/downloads', methods=['GET'])
+@require_auth
 def list_downloads():
     downloads = []
     sorted_ids = sorted(download_progress.keys(), key=lambda k: download_progress[k]['start_time'], reverse=True)
@@ -265,10 +318,12 @@ def list_downloads():
     return jsonify({"downloads": downloads})
 
 @app.route('/download_file/<path:filename>')
+@require_auth
 def download_file(filename):
     return send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
 
 @app.route('/delete_file', methods=['POST'])
+@require_auth
 def delete_file():
     filename = request.form.get('filename')
     if not filename: abort(400)
