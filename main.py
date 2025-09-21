@@ -16,6 +16,7 @@ from functools import wraps
 import shutil
 import queue
 import json
+import fcntl  # For file locking
 import atexit
 
 # Load environment variables from .env file
@@ -81,18 +82,53 @@ APP_DATA_FILE = APP_DATA_FOLDER / 'app_data.json'
 def save_data():
     """Save download progress and queue state when app exits."""
     try:
-        # TODO: Implement saving logic
         logger.info("Saving app data...")
-        with APP_DATA_FILE.open('w') as f:
-            data_to_save = {
-                'download_progress': download_progress,
-                'download_queue': list(download_queue.queue),
-                'active_downloads': list(active_downloads),
-                'search_history': search_history
-            }
-            logger.debug(f"App data to save: {data_to_save}")
-            json.dump(data_to_save, f)
-        logger.info("App data saved successfully.")
+        
+        # Create app data folder if it doesn't exist
+        APP_DATA_FOLDER.mkdir(parents=True, exist_ok=True)
+        
+        data_to_save = {
+            'download_progress': download_progress,
+            'download_queue': list(download_queue.queue),
+            'active_downloads': list(active_downloads),
+            'search_history': search_history
+        }
+        
+        # Use file locking to prevent race conditions between multiple processes
+        lock_file = APP_DATA_FILE.with_suffix('.lock')
+        
+        # Try to acquire exclusive lock
+        try:
+            with lock_file.open('w') as lock_fd:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                
+                # Check if we should save (only if we have data or file doesn't exist)
+                if any(data_to_save.values()) or not APP_DATA_FILE.exists():
+                    logger.debug(f"App data to save: {data_to_save}")
+                    
+                    # Write to a temporary file first, then move to prevent corruption
+                    temp_file = APP_DATA_FILE.with_suffix('.tmp')
+                    with temp_file.open('w') as f:
+                        json.dump(data_to_save, f, indent=2)
+                    temp_file.replace(APP_DATA_FILE)
+                    
+                    logger.info("App data saved successfully.")
+                else:
+                    logger.debug("No meaningful data to save, skipping")
+                
+                # Lock is automatically released when file is closed
+                
+        except (OSError, IOError) as lock_error:
+            # Another process is already saving, skip this save
+            logger.debug(f"Another process is saving data, skipping: {lock_error}")
+            return
+        
+        # Clean up lock file
+        try:
+            lock_file.unlink(missing_ok=True)
+        except:
+            pass  # Ignore cleanup errors
+            
     except Exception as e:
         logger.error(f"Failed to save data: {e}")
 
@@ -865,7 +901,18 @@ def not_found_error(error):
 application = app
 
 # Load data on startup and register save on exit
+_init_called = False  # Prevent multiple initializations
+
 def init():
+    global _init_called
+    
+    # Prevent multiple initializations (important for Gunicorn workers)
+    if _init_called:
+        logger.debug("init() already called, skipping duplicate initialization")
+        return
+    
+    _init_called = True
+    
     # Create the directories if they don't exist
     for directory in [DOWNLOAD_DIR, COMPLETED_DIR, APP_DATA_FOLDER]:
         if not directory.exists():
@@ -875,8 +922,12 @@ def init():
             except OSError as e:
                 logger.error(f"FATAL: Could not create directory at '{directory}'. Please check permissions. Error: {e}")
                 # In a real app, you might want to exit here if the directory is critical
+    
     load_data()
+    
+    # Register save_data only once
     atexit.register(save_data)
+    
     logger.info("Application data directories initialized.")
 
 init()
