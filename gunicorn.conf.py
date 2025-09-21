@@ -7,8 +7,8 @@ import os
 bind = f"0.0.0.0:{os.getenv('PORT', '5000')}"
 backlog = 2048
 
-# Worker processes
-workers = int(os.getenv('GUNICORN_WORKERS', '4'))
+# Worker processes - Using 1 worker for homelab to maintain shared state
+workers = int(os.getenv('GUNICORN_WORKERS', '1'))
 worker_class = "sync"
 worker_connections = 1000
 timeout = int(os.getenv('GUNICORN_TIMEOUT', '30'))

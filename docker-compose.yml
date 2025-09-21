@@ -16,11 +16,11 @@ services:
       - .env
     volumes:
       # Mount downloads directory for in-progress downloads
-      - ./downloads:/app/downloads
+      - /DATA/AppData/acer-pal/downloads:/app/downloads
       # Mount completed directory for finished downloads (Sonarr blackhole)
-      - ./completed:/app/completed
+      - /DATA/AppData/acer-pal/completed:/app/completed
       # Mount logs directory (optional)
-      - ./logs:/app/logs
+      - /DATA/AppData/acer-pal/logs:/app/logs
     networks:
       - acer-pal-network
     healthcheck:
