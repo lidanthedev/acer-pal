@@ -76,10 +76,71 @@ for directory in [DOWNLOAD_DIR, COMPLETED_DIR]:
         
 def sanitize_filename(filename):
     """Removes illegal characters from a filename."""
+    # Remove invalid characters and replace spaces with underscores
     sanitized = re.sub(r'[\\/*?:"<>|]', "", filename)
     sanitized = sanitized.replace(' ', '_')
     # Limit filename length to avoid issues with file systems
     return sanitized[:200]
+
+def create_episode_filename_from_context(show_title, episode_title, selected_quality, original_filename):
+    """Create a clean, simple episode filename: Show.Title.S##E##.Quality.ext"""
+    try:
+        # Extract file extension from original filename
+        _, ext = os.path.splitext(original_filename)
+        if not ext or ext in ['.720p', '.1080p', '.4K']:  # Handle cases where quality is mistaken for extension
+            ext = '.mp4'
+        
+        # Clean show title - replace spaces with dots and remove invalid characters
+        clean_show_title = show_title.strip()
+        clean_show_title = re.sub(r'[\\/*?:"<>|]', '', clean_show_title)
+        clean_show_title = clean_show_title.replace(' ', '.')
+        
+        # Extract season and episode from episode_title
+        season_num = 1  # default
+        episode_num = 1  # default
+        
+        # Look for SxxExx pattern first
+        sxxexx_match = re.search(r'S(\d+)E(\d+)', episode_title, re.IGNORECASE)
+        if sxxexx_match:
+            season_num = int(sxxexx_match.group(1))
+            episode_num = int(sxxexx_match.group(2))
+        else:
+            # Look for Season X Episode Y pattern
+            season_match = re.search(r'Season[_\s](\d+)', episode_title, re.IGNORECASE)
+            if season_match:
+                season_num = int(season_match.group(1))
+            
+            episode_match = re.search(r'Episode[_\s](\d+)', episode_title, re.IGNORECASE)
+            if episode_match:
+                episode_num = int(episode_match.group(1))
+        
+        # Extract season from selected_quality if not found in episode title
+        if 'Season' in selected_quality:
+            season_quality_match = re.search(r'Season\s*(\d+)', selected_quality, re.IGNORECASE)
+            if season_quality_match:
+                season_num = int(season_quality_match.group(1))
+        
+        # Extract only the resolution from selected_quality (keep it simple)
+        quality = '720p'  # default
+        resolution_priorities = ['4K', '2160p', '1080p', '720p', '480p']
+        for res in resolution_priorities:
+            if re.search(res, selected_quality, re.IGNORECASE):
+                quality = res
+                break
+        
+        # Format the filename: Show.Title.S##E##.Quality.ext
+        season_str = f"S{season_num:02d}"
+        episode_str = f"E{episode_num:02d}"
+        
+        formatted_filename = f"{clean_show_title}.{season_str}{episode_str}.{quality}{ext}"
+        
+        logger.info(f"Simple filename: '{show_title}' + '{episode_title}' + '{selected_quality}' -> '{formatted_filename}'")
+        return formatted_filename
+        
+    except Exception as e:
+        logger.warning(f"Failed to create episode filename from context: {e}")
+        # Fall back to original sanitization
+        return sanitize_filename(original_filename)
 
 # --- Authentication Routes ---
 
@@ -166,6 +227,7 @@ def list_episodes():
     episodes_api_url = request.form.get('episodes_api_url')
     show_title = request.form.get('title')
     show_image = request.form.get('image')
+    selected_quality = request.form.get('quality')  # Get the selected quality/season info
     if not episodes_api_url:
         return "Error: No episodes URL provided.", 400
     endpoint = Endpoint(url=f'{API_BASE_URL}/sourceEpisodes', headers=DEFAULT_HEADERS, method='POST', payload={"url": episodes_api_url})
@@ -173,7 +235,7 @@ def list_episodes():
         response_data, status_code, _ = endpoint.fetch()
         if status_code == 200 and response_data.get('sourceEpisodes'):
             show_info = {'title': show_title, 'image': show_image}
-            return render_template('episodes.html', episodes=response_data['sourceEpisodes'], show=show_info)
+            return render_template('episodes.html', episodes=response_data['sourceEpisodes'], show=show_info, selected_quality=selected_quality)
         else:
             return "Could not fetch episode list for this source.", 404
     except Exception as e:
@@ -237,6 +299,12 @@ def start_download():
     source_api_url = request.form.get('source_api_url')
     filename = request.form.get('filename', 'download.mp4')
     series_type = request.form.get('seriesType', 'episode')
+    
+    # Get additional context for TV episodes
+    show_title = request.form.get('show_title')
+    episode_title = request.form.get('episode_title')
+    selected_quality = request.form.get('selected_quality')
+    
     if not source_api_url:
         return "Error: No source URL provided.", 400
     try:
@@ -245,7 +313,15 @@ def start_download():
         if status_code != 200 or not response_data.get('sourceUrl'):
             return "Error: Could not retrieve the final download URL from the API.", 500
         direct_download_url = unquote(response_data['sourceUrl'])
-        safe_filename = sanitize_filename(filename)
+        
+        # Create smart filename based on context
+        if series_type == 'episode' and show_title and episode_title and selected_quality:
+            safe_filename = create_episode_filename_from_context(show_title, episode_title, selected_quality, filename)
+            logger.info(f"Generated clean filename: {safe_filename}")
+        else:
+            safe_filename = sanitize_filename(filename)
+            logger.info(f"Using sanitized filename: {safe_filename}")
+        
         download_id = str(uuid.uuid4())
         download_progress[download_id] = {'status': 'starting', 'progress': 0, 'speed': '0 KB/s', 'size': '0 MB', 'downloaded': 0, 'total': 0, 'start_time': time.time(), 'filename': safe_filename, 'error': None}
         thread = threading.Thread(target=download_file_thread, args=(download_id, direct_download_url, safe_filename))
@@ -263,6 +339,7 @@ def download_all_season():
     """Download all episodes of a season."""
     episodes_data = request.form.get('episodes_data')
     show_title = request.form.get('show_title', 'Unknown_Show')
+    selected_quality = request.form.get('selected_quality')
     
     if not episodes_data:
         return "Error: No episodes data provided.", 400
@@ -299,7 +376,11 @@ def download_all_season():
                     continue
                 
                 direct_download_url = unquote(response_data['sourceUrl'])
-                safe_filename = sanitize_filename(f"{show_title}_{episode_title}.mp4")
+                # Use context-based filename generation for better formatting
+                if selected_quality:
+                    safe_filename = create_episode_filename_from_context(show_title, episode_title, selected_quality, f"{episode_title}.mp4")
+                else:
+                    safe_filename = sanitize_filename(f"{show_title}_{episode_title}.mp4")
                 download_id = str(uuid.uuid4())
                 
                 download_progress[download_id] = {
@@ -430,13 +511,19 @@ def move_to_completed():
 def download_file_thread(download_id, url, filename):
     try:
         download_progress[download_id]['status'] = 'downloading'
+        # Always use our clean filename, ignore any server-provided filename
         file_path = os.path.join(DOWNLOAD_DIR, filename)
+        logger.info(f"Starting download: {download_id} -> {filename}")
+        
+        # Ensure the filename is exactly what we want by creating the file directly
         with requests.get(url, stream=True, timeout=60) as response:
             response.raise_for_status()
             total_size = int(response.headers.get('content-length', 0))
             download_progress[download_id]['total'] = total_size
             downloaded = 0
             start_time = time.time()
+            
+            # Create the file with our exact filename, ignoring Content-Disposition
             with open(file_path, 'wb') as file:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
@@ -448,9 +535,15 @@ def download_file_thread(download_id, url, filename):
                         progress = (downloaded / total_size * 100) if total_size > 0 else 0
                         download_progress[download_id].update({'progress': progress, 'downloaded': downloaded, 'speed': format_speed(speed), 'size': format_size(total_size)})
         
-        # Download completed successfully
+        # Download completed successfully - file should already have our clean filename
         download_progress[download_id].update({'status': 'completed', 'progress': 100})
-        logger.info(f"Download completed: {download_id} - {filename}")
+        logger.info(f"Download completed with clean filename: {download_id} - {filename}")
+        
+        # Verify the file exists with our expected name
+        if not os.path.exists(file_path):
+            logger.error(f"Downloaded file not found at expected path: {file_path}")
+            download_progress[download_id].update({'status': 'error', 'error': 'File not found after download'})
+            return
         
         # Move file to completed directory if auto-move is enabled (for Sonarr integration)
         if ENABLE_AUTO_MOVE:
