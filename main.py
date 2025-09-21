@@ -483,5 +483,9 @@ def format_speed(bytes_per_second):
 def not_found_error(error):
     return render_template('404.html'), 404
 
+# Create the Flask application instance for WSGI
+application = app
+
 if __name__ == '__main__':
+    # Only run the development server when called directly
     app.run(debug=DEBUG, host=HOST, port=PORT)

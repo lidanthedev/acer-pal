@@ -45,6 +45,11 @@ FLASK_DEBUG=0
 HOST=0.0.0.0
 PORT=5000
 
+# Gunicorn Configuration (production WSGI server)
+GUNICORN_WORKERS=4
+GUNICORN_TIMEOUT=30
+GUNICORN_KEEPALIVE=2
+
 # API Configuration
 API_BASE_URL=https://acermovies.val.run/api
 
@@ -114,6 +119,31 @@ The following directories are mounted as volumes:
 - `./downloads:/app/downloads` - In-progress downloads
 - `./completed:/app/completed` - Completed downloads (Sonarr blackhole)
 - `./logs:/app/logs` - Application logs (optional)
+
+## Production WSGI Server
+
+This application uses **Gunicorn** as the production WSGI server instead of Flask's development server:
+
+### Features:
+- **4 worker processes** for handling concurrent requests
+- **Production-grade** performance and stability
+- **Configurable** via environment variables
+- **Proper logging** with request details
+- **Graceful worker recycling** to prevent memory leaks
+
+### Configuration:
+```bash
+# Gunicorn settings in .env
+GUNICORN_WORKERS=4        # Number of worker processes
+GUNICORN_TIMEOUT=30       # Request timeout in seconds
+GUNICORN_KEEPALIVE=2      # Keep-alive connections
+```
+
+### Local Testing:
+```bash
+# Test with Gunicorn locally
+uv run gunicorn --config gunicorn.conf.py main:application
+```
 
 ## Sonarr Integration (Blackhole Method)
 

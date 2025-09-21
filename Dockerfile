@@ -64,5 +64,5 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5000/login || exit 1
 
-# Run the application
-CMD ["python", "main.py"]
+# Run the application with Gunicorn WSGI server
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "main:application"]
