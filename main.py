@@ -48,7 +48,7 @@ def require_auth(f):
 
 
 # --- Constants & Configuration ---
-API_BASE_URL = os.getenv('API_BASE_URL', 'https://acermovies.val.run/api')
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://api.acermovies.fun/api')
 DEFAULT_HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 # FIX 1: Use an absolute path for the default download directory.
 # This makes the path relative to the script's location, which is much more reliable.
